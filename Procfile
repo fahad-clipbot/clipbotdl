@@ -1,1 +1,1 @@
-worker: python3 bot_simple.py
+worker: python bot_with_paypal.py
