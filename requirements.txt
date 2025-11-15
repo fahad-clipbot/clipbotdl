@@ -1,0 +1,7 @@
+python-telegram-bot==22.5
+yt-dlp==2025.11.12
+instagrapi==2.2.1
+requests==2.32.4
+python-dotenv==1.2.1
+stripe==11.1.1
+sqlite3
