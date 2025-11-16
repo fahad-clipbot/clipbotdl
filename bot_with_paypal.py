@@ -209,6 +209,20 @@ class PayPalSubscriptionBot:
         await query.answer()
         
         telegram_id = query.from_user.id
+        user = query.from_user
+        
+        # إنشاء المستخدم إذا لم يكن موجوداً
+        db.add_user(
+            telegram_id=telegram_id,
+            username=user.username,
+            first_name=user.first_name,
+            last_name=user.last_name
+        )
+        
+        # إنشاء اشتراك مجاني إذا لم يكن موجوداً
+        if not db.get_user_subscription(telegram_id):
+            db.create_subscription(telegram_id, "free")
+        
         subscription = db.get_user_subscription(telegram_id)
         
         if not subscription:
@@ -497,12 +511,171 @@ class PayPalSubscriptionBot:
             parse_mode="Markdown"
         )
     
+    async def setup_bot_commands(self, app):
+        """إعداد أوامر البوت في القائمة"""
+        commands = [
+            ("start", "🎉 البدء وعرض القائمة الرئيسية"),
+            ("subscribe", "📦 عرض خطط الاشتراك"),
+            ("status", "📊 حالة اشتراكك الحالي"),
+            ("help", "❓ المساعدة والدعم"),
+        ]
+        await app.bot.set_my_commands(commands)
+        logger.info("✅ تم إعداد أوامر البوت في القائمة")
+    
+    async def cmd_subscribe(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """معالج أمر /subscribe"""
+        user = update.effective_user
+        telegram_id = user.id
+        
+        # إضافة المستخدم
+        db.add_user(
+            telegram_id=telegram_id,
+            username=user.username,
+            first_name=user.first_name,
+            last_name=user.last_name
+        )
+        
+        plans_message = "🎁 **خطط الاشتراك المتاحة:**\n\n"
+        
+        keyboard = []
+        
+        for plan_id, plan in self.PLANS.items():
+            plans_message += f"**{plan['name']}** - ${plan['price']}/شهر\n"
+            features_text = ''.join([f'✅ {f}\n' for f in plan['features']])
+            plans_message += f"{features_text}\n"
+            
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"اشترك في {plan['name']}",
+                    callback_data=f"subscribe_{plan_id}"
+                )
+            ])
+        
+        plans_message += "\n💳 اختر خطة الاشتراك أعلاه"
+        
+        await update.message.reply_text(
+            plans_message,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
+    
+    async def cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """معالج أمر /status"""
+        user = update.effective_user
+        telegram_id = user.id
+        
+        # إضافة المستخدم
+        db.add_user(
+            telegram_id=telegram_id,
+            username=user.username,
+            first_name=user.first_name,
+            last_name=user.last_name
+        )
+        
+        # إنشاء اشتراك مجاني إذا لم يكن موجوداً
+        if not db.get_user_subscription(telegram_id):
+            db.create_subscription(telegram_id, "free")
+        
+        subscription = db.get_user_subscription(telegram_id)
+        tier = subscription['tier']
+        is_active = db.is_subscription_active(telegram_id)
+        downloads_today = db.get_user_downloads_today(telegram_id)
+        
+        if tier == "free":
+            status_message = f"""
+🆓 **اشتراكك الحالي: مجاني**
+
+📊 التنزيلات اليوم: {downloads_today}/5
+✅ الحالة: {'\u0646شط' if is_active else 'غير نشط'}
+
+🔒 **القيود:**
+• 5 تنزيلات يومياً
+• جودة قياسية
+• مع إعلانات
+
+🚀 اشترك الآن للحصول على مزايا أكثر!
+            """
+        else:
+            plan = self.PLANS.get(tier, {})
+            status_message = f"""
+⭐ **اشتراكك الحالي: {plan.get('name', tier)}**
+
+💰 السعر: ${plan.get('price', 0)}/شهر
+📊 التنزيلات اليوم: {downloads_today}
+✅ الحالة: {'\u0646شط' if is_active else 'غير نشط'}
+
+✨ **الميزات:**
+            """
+            for feature in plan.get('features', []):
+                status_message += f"✅ {feature}\n"
+        
+        keyboard = [
+            [InlineKeyboardButton("📦 تغيير الخطة", callback_data="show_plans")],
+        ]
+        
+        await update.message.reply_text(
+            status_message,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
+    
+    async def cmd_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """معالج أمر /help"""
+        help_message = """
+❓ **المساعدة والدعم**
+
+**كيفية الاستخدام:**
+1. أرسل رابط المحتوى
+2. انتظر التنزيل
+3. احفظ المحتوى
+
+**الأوامر:**
+/start - البدء
+/subscribe - عرض الخطط
+/status - حالة الاشتراك
+/help - المساعدة
+
+**المنصات المدعومة:**
+✅ يوتيوب
+✅ تيك توك
+✅ انستقرام
+
+**طرق الدفع:**
+💳 PayPal
+
+**المشاكل الشائعة:**
+❓ رابط غير صحيح؟
+→ تأكد من نسخ الرابط كاملاً
+
+❓ الفيديو كبير جداً؟
+→ اشترك في خطة أعلى
+
+❓ لا تعمل؟
+→ تواصل معنا: support@
+        """
+        
+        keyboard = [
+            [InlineKeyboardButton("📦 عرض الخطط", callback_data="show_plans")],
+        ]
+        
+        await update.message.reply_text(
+            help_message,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
+    
     def run(self):
         """تشغيل البوت"""
         app = Application.builder().token(BOT_TOKEN).build()
         
+        # إعداد أوامر القائمة
+        app.post_init = self.setup_bot_commands
+        
         # معالجات الأوامر
         app.add_handler(CommandHandler("start", self.start))
+        app.add_handler(CommandHandler("subscribe", self.cmd_subscribe))
+        app.add_handler(CommandHandler("status", self.cmd_status))
+        app.add_handler(CommandHandler("help", self.cmd_help))
         
         # معالجات الأزرار
         app.add_handler(CallbackQueryHandler(self.button_handler))
