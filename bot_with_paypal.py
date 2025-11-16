@@ -298,6 +298,10 @@ class PayPalSubscriptionBot:
         telegram_id = user.id
         url = update.message.text
         
+        # تجاهل الرسائل غير الروابط (مثل الأوامر والنصوص العادية)
+        if not url or not url.startswith(('http://', 'https://')):
+            return
+        
         # التحقق من الاشتراك
         tier = db.get_subscription_tier(telegram_id)
         
