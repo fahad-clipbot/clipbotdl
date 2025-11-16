@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 from downloader import MediaDownloader
 from database_models import Database
 from paypal_payment_system import PayPalPaymentManager
+from cobalt_downloader import CobaltDownloader, UniversalDownloader
 
 # تحميل المتغيرات
 load_dotenv()
@@ -323,32 +324,52 @@ class PayPalSubscriptionBot:
             platform = None
             media_category = None
             
-            # محاولة تنزيل الفيديو أولاً
-            if media_type in ['video', 'unknown']:
-                try:
-                    filename, platform = MediaDownloader.download_video(url)
-                    media_category = "فيديو"
-                except Exception as e:
-                    logger.warning(f"فشل تنزيل الفيديو، محاولة الصورة: {str(e)}")
-                    filename = None
-            
-            # محاولة تنزيل الصورة إذا فشل الفيديو
-            if not filename and MediaDownloader.is_instagram_url(url):
-                try:
-                    filename, platform = MediaDownloader.download_image(url)
-                    media_category = "صورة"
-                except Exception as e:
-                    logger.warning(f"فشل تنزيل الصورة: {str(e)}")
-                    filename = None
-            
-            # محاولة تنزيل الصوت
-            if not filename:
-                try:
-                    filename, platform = MediaDownloader.download_audio(url)
+            # الطريقة 1: محاولة Cobalt API (الأفضل)
+            try:
+                logger.info("محاولة Cobalt API...")
+                
+                if media_type == 'audio':
+                    filename, platform = UniversalDownloader.download_audio(url)
                     media_category = "موسيقى"
-                except Exception as e:
-                    logger.warning(f"فشل تنزيل الصوت: {str(e)}")
-                    filename = None
+                elif media_type == 'image':
+                    filename, platform = UniversalDownloader.download_image(url)
+                    media_category = "صورة"
+                else:
+                    filename, platform = UniversalDownloader.download_video(url)
+                    media_category = "فيديو"
+                
+                logger.info(f"نجح Cobalt API: {filename}")
+            
+            except Exception as cobalt_error:
+                logger.warning(f"فشل Cobalt API: {str(cobalt_error)}، محاولة الطرق البديلة...")
+                
+                # الطريقة 2: محاولة MediaDownloader (البديل)
+                # محاولة تنزيل الفيديو أولاً
+                if media_type in ['video', 'unknown']:
+                    try:
+                        filename, platform = MediaDownloader.download_video(url)
+                        media_category = "فيديو"
+                    except Exception as e:
+                        logger.warning(f"فشل تنزيل الفيديو، محاولة الصورة: {str(e)}")
+                        filename = None
+                
+                # محاولة تنزيل الصورة إذا فشل الفيديو
+                if not filename and MediaDownloader.is_instagram_url(url):
+                    try:
+                        filename, platform = MediaDownloader.download_image(url)
+                        media_category = "صورة"
+                    except Exception as e:
+                        logger.warning(f"فشل تنزيل الصورة: {str(e)}")
+                        filename = None
+                
+                # محاولة تنزيل الصوت
+                if not filename:
+                    try:
+                        filename, platform = MediaDownloader.download_audio(url)
+                        media_category = "موسيقى"
+                    except Exception as e:
+                        logger.warning(f"فشل تنزيل الصوت: {str(e)}")
+                        filename = None
             
             # إرسال الملف إذا تم تنزيله بنجاح
             if filename and os.path.exists(filename):
