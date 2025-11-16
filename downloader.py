@@ -11,6 +11,7 @@ import logging
 from pathlib import Path
 from typing import Tuple
 import yt_dlp
+import requests
 from config import DOWNLOAD_FOLDER, SOCKET_TIMEOUT
 
 logger = logging.getLogger(__name__)
@@ -42,13 +43,26 @@ class MediaDownloader:
                 MediaDownloader.is_instagram_url(url))
 
     @staticmethod
+    def _expand_tiktok_url(url: str) -> str:
+        """توسيع رابط تيك توك المختصر إلى الرابط الكامل"""
+        try:
+            if 'vt.tiktok.com' in url or 'vm.tiktok.com' in url:
+                response = requests.head(url, allow_redirects=True, timeout=5)
+                if response.status_code == 200:
+                    logger.info(f"تم توسيع رابط تيك توك من {url} إلى {response.url}")
+                    return response.url
+        except Exception as e:
+            logger.warning(f"فشل توسيع رابط تيك توك: {str(e)}")
+        return url
+
+    @staticmethod
     def _get_ydl_opts_video(output_template: str) -> dict:
         """الحصول على خيارات yt-dlp لتنزيل الفيديو"""
         return {
             'format': 'best[ext=mp4]/best',
             'outtmpl': os.path.join(DOWNLOAD_FOLDER, output_template),
-            'quiet': False,
-            'no_warnings': False,
+            'quiet': True,
+            'no_warnings': True,
             'socket_timeout': SOCKET_TIMEOUT,
             'http_headers': {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -65,14 +79,16 @@ class MediaDownloader:
         return {
             'format': 'best',
             'outtmpl': os.path.join(DOWNLOAD_FOLDER, output_template),
-            'quiet': False,
-            'no_warnings': False,
+            'quiet': True,
+            'no_warnings': True,
             'socket_timeout': SOCKET_TIMEOUT,
             'http_headers': {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
             },
             'skip_download': False,
             'writethumbnail': True,
+            'extract_flat': False,
+            'no_check_certificate': True,
         }
 
     @staticmethod
@@ -81,8 +97,8 @@ class MediaDownloader:
         return {
             'format': 'bestaudio/best',
             'outtmpl': os.path.join(DOWNLOAD_FOLDER, output_template),
-            'quiet': False,
-            'no_warnings': False,
+            'quiet': True,
+            'no_warnings': True,
             'socket_timeout': SOCKET_TIMEOUT,
             'http_headers': {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -119,7 +135,6 @@ class MediaDownloader:
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
-                # البحث عن ملف MP3
                 base_filename = os.path.splitext(ydl.prepare_filename(info))[0]
                 mp3_file = base_filename + '.mp3'
                 
@@ -172,6 +187,22 @@ class MediaDownloader:
             raise
 
     @staticmethod
+    def download_tiktok_image(url: str) -> str:
+        """تنزيل صورة من تيك توك"""
+        try:
+            logger.info(f"جاري تنزيل صورة تيك توك: {url}")
+            ydl_opts = MediaDownloader._get_ydl_opts_image('tiktok_image_%(id)s.%(ext)s')
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                filename = ydl.prepare_filename(info)
+                logger.info(f"تم تنزيل صورة تيك توك بنجاح: {filename}")
+                return filename
+        except Exception as e:
+            logger.error(f"خطأ في تنزيل صورة تيك توك: {str(e)}")
+            raise
+
+    @staticmethod
     def download_instagram_video(url: str) -> str:
         """تنزيل فيديو من انستقرام"""
         try:
@@ -221,7 +252,8 @@ class MediaDownloader:
             filename = MediaDownloader.download_youtube_video(url)
             return filename, "يوتيوب"
         elif MediaDownloader.is_tiktok_url(url):
-            filename = MediaDownloader.download_tiktok_video(url)
+            expanded_url = MediaDownloader._expand_tiktok_url(url)
+            filename = MediaDownloader.download_tiktok_video(expanded_url)
             return filename, "تيك توك"
         elif MediaDownloader.is_instagram_url(url):
             filename = MediaDownloader.download_instagram_video(url)
@@ -249,7 +281,8 @@ class MediaDownloader:
             filename = MediaDownloader.download_youtube_audio(url)
             return filename, "يوتيوب"
         elif MediaDownloader.is_tiktok_url(url):
-            filename = MediaDownloader.download_tiktok_audio(url)
+            expanded_url = MediaDownloader._expand_tiktok_url(url)
+            filename = MediaDownloader.download_tiktok_audio(expanded_url)
             return filename, "تيك توك"
         else:
             raise ValueError(
@@ -273,9 +306,13 @@ class MediaDownloader:
         if MediaDownloader.is_instagram_url(url):
             filename = MediaDownloader.download_instagram_image(url)
             return filename, "انستقرام"
+        elif MediaDownloader.is_tiktok_url(url):
+            expanded_url = MediaDownloader._expand_tiktok_url(url)
+            filename = MediaDownloader.download_tiktok_image(expanded_url)
+            return filename, "تيك توك"
         else:
             raise ValueError(
-                "❌ تنزيل الصور متاح فقط من انستقرام"
+                "❌ تنزيل الصور متاح من انستقرام وتيك توك"
             )
 
     @staticmethod
