@@ -16,7 +16,7 @@ from datetime import datetime
 import os
 from dotenv import load_dotenv
 
-from downloader import VideoDownloader
+from downloader import MediaDownloader
 from database_models import Database
 from paypal_payment_system import PayPalPaymentManager
 
@@ -82,13 +82,18 @@ class PayPalSubscriptionBot:
         welcome_message = f"""
 🎉 **مرحباً {user.first_name}!**
 
-أنا بوت تليجرام لتنزيل الفيديوهات من:
-✅ يوتيوب
-✅ تيك توك
-✅ انستقرام
+أنا بوت تليجرام لتنزيل المحتوى من:
+✅ يوتيوب (فيديو وموسيقى)
+✅ تيك توك (فيديو وموسيقى)
+✅ انستقرام (فيديو وصور)
+
+**المحتوى المدعوم:**
+🎬 الفيديوهات
+📸 الصور
+🎵 الموسيقى والأصوات
 
 **كيفية الاستخدام:**
-1️⃣ أرسل لي رابط الفيديو
+1️⃣ أرسل لي رابط المحتوى
 2️⃣ سأقوم بتنزيله
 3️⃣ سأرسله إليك مباشرة
 
@@ -248,8 +253,32 @@ class PayPalSubscriptionBot:
             parse_mode="Markdown"
         )
     
+    def _detect_media_type(self, url: str) -> str:
+        """الكشف عن نوع المحتوى من الرابط"""
+        url_lower = url.lower()
+        
+        # الكشف عن الصور من انستقرام
+        if MediaDownloader.is_instagram_url(url):
+            if '/p/' in url or '/reel/' in url:
+                return 'video'
+            elif '/stories/' in url:
+                return 'image'
+            return 'video'
+        
+        # الكشف عن الموسيقى من يوتيوب
+        if MediaDownloader.is_youtube_url(url):
+            if any(word in url_lower for word in ['music', 'song', 'audio', 'playlist']):
+                return 'audio'
+            return 'video'
+        
+        # الكشف عن الموسيقى من تيك توك
+        if MediaDownloader.is_tiktok_url(url):
+            return 'video'
+        
+        return 'unknown'
+    
     async def handle_url(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """معالج الروابط المرسلة"""
+        """معالج الروابط المرسلة مع دعم الفيديوهات والصور والأصوات"""
         user = update.effective_user
         telegram_id = user.id
         url = update.message.text
@@ -273,46 +302,106 @@ class PayPalSubscriptionBot:
             return
         
         # التحقق من صحة الرابط
-        if not VideoDownloader.is_valid_url(url):
+        if not MediaDownloader.is_valid_url(url):
             await update.message.reply_text(
                 "❌ رابط غير صحيح\n\n"
                 "الروابط المدعومة:\n"
-                "• يوتيوب\n"
-                "• تيك توك\n"
-                "• انستقرام"
+                "🎬 يوتيوب (فيديو وموسيقى)\n"
+                "🎬 تيك توك (فيديو وموسيقى)\n"
+                "🎬 انستقرام (فيديو وصور)"
             )
             return
+        
+        # الكشف عن نوع المحتوى
+        media_type = self._detect_media_type(url)
         
         # بدء التنزيل
         await update.message.reply_text("⏳ جاري التنزيل...")
         
         try:
-            filename, platform = VideoDownloader.download_video(url)
+            filename = None
+            platform = None
+            media_category = None
             
+            # محاولة تنزيل الفيديو أولاً
+            if media_type in ['video', 'unknown']:
+                try:
+                    filename, platform = MediaDownloader.download_video(url)
+                    media_category = "فيديو"
+                except Exception as e:
+                    logger.warning(f"فشل تنزيل الفيديو، محاولة الصورة: {str(e)}")
+                    filename = None
+            
+            # محاولة تنزيل الصورة إذا فشل الفيديو
+            if not filename and MediaDownloader.is_instagram_url(url):
+                try:
+                    filename, platform = MediaDownloader.download_image(url)
+                    media_category = "صورة"
+                except Exception as e:
+                    logger.warning(f"فشل تنزيل الصورة: {str(e)}")
+                    filename = None
+            
+            # محاولة تنزيل الصوت
+            if not filename:
+                try:
+                    filename, platform = MediaDownloader.download_audio(url)
+                    media_category = "موسيقى"
+                except Exception as e:
+                    logger.warning(f"فشل تنزيل الصوت: {str(e)}")
+                    filename = None
+            
+            # إرسال الملف إذا تم تنزيله بنجاح
             if filename and os.path.exists(filename):
                 # تسجيل التنزيل
                 db.record_download(telegram_id)
                 
-                # إرسال الملف
-                with open(filename, 'rb') as video:
-                    await update.message.reply_video(
-                        video=video,
-                        caption=f"✅ تم التنزيل من {platform}"
-                    )
+                # إرسال الملف بناءً على نوعه
+                try:
+                    with open(filename, 'rb') as file:
+                        if media_category == "صورة":
+                            await update.message.reply_photo(
+                                photo=file,
+                                caption=f"✅ تم التنزيل من {platform}"
+                            )
+                        elif media_category == "موسيقى":
+                            await update.message.reply_audio(
+                                audio=file,
+                                caption=f"✅ تم التنزيل من {platform}"
+                            )
+                        else:  # فيديو
+                            await update.message.reply_video(
+                                video=file,
+                                caption=f"✅ تم التنزيل من {platform}"
+                            )
+                    
+                    logger.info(f"✅ تم تنزيل {media_category}: {platform} - {telegram_id}")
                 
-                # حذف الملف
-                os.remove(filename)
-                logger.info(f"✅ تم تنزيل: {platform} - {telegram_id}")
+                except Exception as e:
+                    logger.error(f"خطأ في إرسال الملف: {str(e)}")
+                    await update.message.reply_text(
+                        f"❌ حدث خطأ في إرسال الملف: {str(e)}"
+                    )
+                finally:
+                    # حذف الملف
+                    try:
+                        os.remove(filename)
+                    except:
+                        pass
             else:
                 await update.message.reply_text(
                     "❌ حدث خطأ في التنزيل\n\n"
-                    "تأكد من أن الرابط صحيح والفيديو متاح"
+                    "تأكد من أن الرابط صحيح والمحتوى متاح\n"
+                    "الرابط قد يكون:\n"
+                    "• محذوفاً أو محظوراً\n"
+                    "• خاصاً ولا يمكن الوصول إليه\n"
+                    "• من منصة غير مدعومة"
                 )
         
         except Exception as e:
             logger.error(f"❌ خطأ: {str(e)}")
             await update.message.reply_text(
-                f"❌ حدث خطأ: {str(e)}"
+                f"❌ حدث خطأ: {str(e)}\n\n"
+                "يرجى المحاولة لاحقاً أو التواصل مع الدعم"
             )
     
     async def button_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -340,9 +429,9 @@ class PayPalSubscriptionBot:
 ❓ **المساعدة والدعم**
 
 **كيفية الاستخدام:**
-1. أرسل رابط الفيديو
+1. أرسل رابط المحتوى
 2. انتظر التنزيل
-3. احفظ الفيديو
+3. احفظ المحتوى
 
 **الأوامر:**
 /start - البدء
@@ -350,10 +439,15 @@ class PayPalSubscriptionBot:
 /status - حالة الاشتراك
 /help - المساعدة
 
-**المنصات المدعومة:**
-✅ يوتيوب
-✅ تيك توك
-✅ انستقرام
+**المنصات والمحتوى المدعوم:**
+✅ يوتيوب (فيديو وموسيقى)
+✅ تيك توك (فيديو وموسيقى)
+✅ انستقرام (فيديو وصور)
+
+**أنواع المحتوى:**
+🎬 الفيديوهات
+📸 الصور
+🎵 الموسيقى والأصوات
 
 **طرق الدفع:**
 💳 PayPal
@@ -362,11 +456,16 @@ class PayPalSubscriptionBot:
 ❓ رابط غير صحيح؟
 → تأكد من نسخ الرابط كاملاً
 
-❓ الفيديو كبير جداً؟
+❓ المحتوى كبير جداً؟
 → اشترك في خطة أعلى
 
 ❓ لا تعمل؟
 → تواصل معنا: @support
+
+**نصائح:**
+💡 استخدم روابط مباشرة من المنصات
+💡 تأكد من أن المحتوى متاح للعامة
+💡 الملفات الكبيرة قد تستغرق وقتاً أطول
         """
         
         keyboard = [[InlineKeyboardButton("⬅️ رجوع", callback_data="back_to_main")]]
@@ -393,12 +492,12 @@ class PayPalSubscriptionBot:
             self.handle_url
         ))
         
-        logger.info("🚀 البوت يعمل الآن مع PayPal...")
+        logger.info("🚀 البوت يعمل الآن مع PayPal (فيديو + صور + موسيقى)...")
         app.run_polling()
 
 
 def main():
-    """دالة البدء الرئيسية"""
+    """الدالة الرئيسية"""
     bot = PayPalSubscriptionBot()
     bot.run()
 
