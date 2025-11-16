@@ -16,13 +16,18 @@ from config import DOWNLOAD_FOLDER, SOCKET_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
-# استيراد معالج صور تيك توك البديل
+# استيراد معالجات صور تيك توك
+try:
+    from tiktok_photo_api import TikTokPhotoDownloader
+    TIKTOK_PHOTO_API_AVAILABLE = True
+except ImportError:
+    TIKTOK_PHOTO_API_AVAILABLE = False
+
 try:
     from tiktok_image_handler import TikTokImageHandler
     TIKTOK_IMAGE_HANDLER_AVAILABLE = True
 except ImportError:
     TIKTOK_IMAGE_HANDLER_AVAILABLE = False
-    logger.warning("معالج صور تيك توك البديل غير متاح")
 
 
 class MediaDownloader:
@@ -196,27 +201,38 @@ class MediaDownloader:
 
     @staticmethod
     def download_tiktok_image(url: str) -> str:
-        """تنزيل صورة من تيك توك باستخدام طريقة بديلة"""
+        """تنزيل صورة من تيك توك باستخدام طرق متعددة"""
         try:
             logger.info(f"جاري تنزيل صورة تيك توك: {url}")
             
-            # محاولة استخدام معالج الصور البديل
-            if TIKTOK_IMAGE_HANDLER_AVAILABLE:
+            # الطريقة 1: معالج TikTok Photo API (الأفضل)
+            if TIKTOK_PHOTO_API_AVAILABLE:
                 try:
-                    filename = TikTokImageHandler.download_tiktok_image(url)
-                    logger.info(f"تم تنزيل صورة تيك توك بنجاح: {filename}")
+                    logger.info("محاولة TikTok Photo API...")
+                    filename = TikTokPhotoDownloader.download(url)
+                    logger.info(f"تم تنزيل الصورة بنجاح: {filename}")
                     return filename
                 except Exception as e:
-                    logger.warning(f"فشل معالج الصور البديل: {str(e)}")
+                    logger.warning(f"فشل TikTok Photo API: {str(e)}")
             
-            # محاولة yt-dlp كبديل
+            # الطريقة 2: معالج الصور البديل
+            if TIKTOK_IMAGE_HANDLER_AVAILABLE:
+                try:
+                    logger.info("محاولة TikTok Image Handler...")
+                    filename = TikTokImageHandler.download_tiktok_image(url)
+                    logger.info(f"تم تنزيل الصورة بنجاح: {filename}")
+                    return filename
+                except Exception as e:
+                    logger.warning(f"فشل TikTok Image Handler: {str(e)}")
+            
+            # الطريقة 3: yt-dlp (البديل الأخير)
             logger.info("محاولة yt-dlp...")
             ydl_opts = MediaDownloader._get_ydl_opts_image('tiktok_image_%(id)s.%(ext)s')
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
                 filename = ydl.prepare_filename(info)
-                logger.info(f"تم تنزيل صورة تيك توك بنجاح: {filename}")
+                logger.info(f"تم تنزيل الصورة بنجاح: {filename}")
                 return filename
         except Exception as e:
             logger.error(f"خطأ في تنزيل صورة تيك توك: {str(e)}")
