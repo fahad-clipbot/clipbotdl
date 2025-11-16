@@ -16,6 +16,14 @@ from config import DOWNLOAD_FOLDER, SOCKET_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
+# استيراد معالج صور تيك توك البديل
+try:
+    from tiktok_image_handler import TikTokImageHandler
+    TIKTOK_IMAGE_HANDLER_AVAILABLE = True
+except ImportError:
+    TIKTOK_IMAGE_HANDLER_AVAILABLE = False
+    logger.warning("معالج صور تيك توك البديل غير متاح")
+
 
 class MediaDownloader:
     """فئة لتنزيل الفيديوهات والصور والأصوات من منصات مختلفة"""
@@ -188,9 +196,21 @@ class MediaDownloader:
 
     @staticmethod
     def download_tiktok_image(url: str) -> str:
-        """تنزيل صورة من تيك توك"""
+        """تنزيل صورة من تيك توك باستخدام طريقة بديلة"""
         try:
             logger.info(f"جاري تنزيل صورة تيك توك: {url}")
+            
+            # محاولة استخدام معالج الصور البديل
+            if TIKTOK_IMAGE_HANDLER_AVAILABLE:
+                try:
+                    filename = TikTokImageHandler.download_tiktok_image(url)
+                    logger.info(f"تم تنزيل صورة تيك توك بنجاح: {filename}")
+                    return filename
+                except Exception as e:
+                    logger.warning(f"فشل معالج الصور البديل: {str(e)}")
+            
+            # محاولة yt-dlp كبديل
+            logger.info("محاولة yt-dlp...")
             ydl_opts = MediaDownloader._get_ydl_opts_image('tiktok_image_%(id)s.%(ext)s')
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
