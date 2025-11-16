@@ -163,17 +163,46 @@ class PayPalSubscriptionBot:
         telegram_id = query.from_user.id
         
         # بدء عملية الدفع
-        # نستخدم رابط وهمي للاختبار، في الإنتاج ستكون رابط حقيقي
+        try:
+            bot_username = (await context.bot.get_me()).username
+            return_url = f"https://t.me/{bot_username}"
+        except:
+            return_url = "https://t.me/ClipBotDL_bot"  # رابط احتياطي
+        
+        logger.info(f"🔄 محاولة إنشاء اشتراك PayPal: {plan_id} للمستخدم {telegram_id}")
+        
         payment_url = payment_manager.initiate_subscription(
             telegram_id=telegram_id,
             plan=plan_id,
-            return_url="https://t.me/your_bot_username"  # استبدل برابط البوت الفعلي
+            return_url=return_url
         )
         
         if not payment_url:
+            logger.error(f"❌ فشل إنشاء رابط PayPal للمستخدم {telegram_id}")
+            
+            error_message = """
+❌ **حدث خطأ في إنشاء جلسة الدفع**
+
+⚠️ **الأسباب المحتملة:**
+• مشكلة في اتصال PayPal
+• بيانات PayPal غير صحيحة
+• الخدمة معطلة مؤقتاً
+
+🔄 **الحلول:**
+1. حاول مرة أخرى بعد قليل
+2. تواصل مع الدعم: @ClipBotDL_Support
+3. استخدم الخطة المجانية مؤقتاً
+            """
+            
+            keyboard = [
+                [InlineKeyboardButton("🔄 إعادة المحاولة", callback_data=f"subscribe_{plan_id}")],
+                [InlineKeyboardButton("⬅️ رجوع", callback_data="back_to_main")],
+            ]
+            
             await query.edit_message_text(
-                "❌ حدث خطأ في إنشاء جلسة الدفع\n\n"
-                "يرجى المحاولة لاحقاً أو التواصل مع الدعم"
+                error_message,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
             )
             return
         
